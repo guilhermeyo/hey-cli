@@ -18,6 +18,24 @@ triggers:
   # Calendar actions
   - hey calendars
   - hey recordings
+  - hey event
+  - hey event list
+  - hey event create
+  - hey event edit
+  - hey event delete
+  - create event
+  - delete event
+  # Move contacts
+  - hey move
+  - move contact
+  - move to feedbox
+  - move to imbox
+  # Extensions
+  - hey extenzion
+  - hey ext
+  - email extension
+  - create extension
+  - list extensions
   # Todos
   - hey todo
   # Seen/unseen
@@ -90,6 +108,17 @@ CLI for HEY email: mailboxes, email threads, replies, compose, calendars, todos,
 | List drafts | `hey drafts --json` |
 | List calendars | `hey calendars --json` |
 | List calendar events | `hey recordings 123 --json` |
+| List events | `hey event list --json` |
+| Create event | `hey event create "Meeting" --date 2026-04-06 --start 10:00 --end 11:00` |
+| Create all-day event | `hey event create "Holiday" --date 2026-04-06 --all-day` |
+| Edit event | `hey event edit 123 --title "New title" --start 14:00 --end 15:00` |
+| Delete event | `hey event delete 123` |
+| Move contact | `hey move 123 --box feedbox --yes` |
+| Move by contact ID | `hey move --contact 456 --box trailbox --yes` |
+| List extensions | `hey ext list --json` |
+| Create extension | `hey ext create sales --member alice@example.com` |
+| Edit extension | `hey ext edit 123 --name support --member bob@example.com` |
+| Delete extension | `hey ext delete 123 --yes` |
 | List todos | `hey todo list --json` |
 | Add todo | `hey todo add "Buy milk"` |
 | Complete todo | `hey todo complete 123` |
@@ -133,6 +162,38 @@ Want to send email?
 ├── Compose new? → hey compose --to <email> --subject "Subject"
 │   └── With body? → hey compose --to <email> --subject "Subject" -m "Body"
 └── Check drafts? → hey drafts --json
+```
+
+### Managing Calendar Events
+
+```
+Want to manage events?
+├── List events? → hey event list --json
+├── Create event? → hey event create "Title" --date YYYY-MM-DD --start HH:MM --end HH:MM
+│   ├── All-day? → add --all-day (omit --start/--end)
+│   ├── With reminder? → add --reminder 30m (or 1h, 1d)
+│   └── Specific calendar? → add --calendar <id>
+├── Edit event? → hey event edit <id> --title "New" --start 14:00 --end 15:00
+└── Delete event? → hey event delete <id>
+```
+
+### Moving Contacts
+
+```
+Want to move a contact to a different box?
+├── By topic ID? → hey move <topic-id> --box feedbox --yes
+├── By contact ID? → hey move --contact <id> --box trailbox --yes
+└── Valid boxes: imbox, feedbox, asidebox, laterbox, trailbox, bubblebox
+```
+
+### Managing Extensions
+
+```
+Want to manage email extensions?
+├── List? → hey ext list --json
+├── Create? → hey ext create <name> --member <email>
+├── Edit? → hey ext edit <id> --name <new-name> --member <email>
+└── Delete? → hey ext delete <id> --yes
 ```
 
 ### Managing Todos
@@ -201,6 +262,37 @@ hey recordings 123 --json                     # List events in calendar
 ```
 
 **Response format:** `hey recordings` returns `{"Calendar::Event": [...]}`. Each event has: `id`, `title`, `starts_at`, `ends_at`, `all_day`, `recurring`, `starts_at_time_zone`. Access events via `.["Calendar::Event"]` in jq.
+
+### Calendar Events
+
+```bash
+hey event list --json                         # List all events
+hey event list --limit 10 --json              # List with limit
+hey event create "Meeting" --date 2026-04-06 --start 10:00 --end 11:00  # Create event
+hey event create "Holiday" --date 2026-04-06 --all-day                  # All-day event
+hey event create "Standup" --date 2026-04-06 --start 09:00 --end 09:30 --reminder 30m --reminder 1d
+hey event edit 123 --title "New title" --start 14:00 --end 15:00  # Edit event
+hey event delete 123                          # Delete event
+```
+
+### Move Contacts
+
+```bash
+hey move 123 --box feedbox --yes              # Move contact by topic ID
+hey move --contact 456 --box trailbox --yes   # Move by contact ID
+```
+
+Box kinds: `imbox`, `feedbox`, `asidebox`, `laterbox`, `trailbox`, `bubblebox`
+
+### Extensions
+
+```bash
+hey ext list --json                           # List email extensions
+hey ext create sales --member alice@example.com  # Create extension
+hey ext create support --member a@ex.com --member b@ex.com  # Multiple members
+hey ext edit 123 --name new-name --member a@ex.com  # Edit extension
+hey ext delete 123 --yes                      # Delete extension
+```
 
 ### Todos
 
