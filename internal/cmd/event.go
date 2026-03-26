@@ -2,6 +2,11 @@ package cmd
 
 import (
 	"fmt"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -23,6 +28,7 @@ func newEventCommand() *eventCommand {
 	}
 
 	eventCommand.cmd.AddCommand(newEventListCommand().cmd)
+	eventCommand.cmd.AddCommand(newEventCreateCommand().cmd)
 
 	return eventCommand
 }
@@ -115,4 +121,201 @@ func (c *eventListCommand) run(cmd *cobra.Command, args []string) error {
 			},
 		),
 	)
+}
+
+// create
+
+type eventCreateCommand struct {
+	cmd       *cobra.Command
+	title     string
+	date      string
+	start     string
+	end       string
+	calendar  int64
+	timezone  string
+	allDay    bool
+	reminders []string
+}
+
+func newEventCreateCommand() *eventCreateCommand {
+	c := &eventCreateCommand{}
+	c.cmd = &cobra.Command{
+		Use:   "create [title]",
+		Short: "Create a calendar event",
+		Example: `  hey event create "Meeting" --date 2026-04-06 --start 10:00 --end 11:00
+  hey event create "Holiday" --date 2026-04-06 --all-day
+  hey event create "Standup" --date 2026-04-06 --start 09:00 --end 09:30 --reminder 30m --reminder 1d`,
+		RunE: c.run,
+		Args: cobra.MaximumNArgs(1),
+	}
+
+	c.cmd.Flags().StringVarP(&c.title, "title", "t", "", "Event title")
+	c.cmd.Flags().StringVar(&c.date, "date", "", "Event date (YYYY-MM-DD)")
+	c.cmd.Flags().StringVar(&c.start, "start", "", "Start time (HH:MM)")
+	c.cmd.Flags().StringVar(&c.end, "end", "", "End time (HH:MM)")
+	c.cmd.Flags().Int64Var(&c.calendar, "calendar", 0, "Calendar ID (default: personal)")
+	c.cmd.Flags().StringVar(&c.timezone, "timezone", "", "Timezone name (default: system local)")
+	c.cmd.Flags().BoolVar(&c.allDay, "all-day", false, "Create an all-day event")
+	c.cmd.Flags().StringSliceVar(&c.reminders, "reminder", nil, "Reminder duration (e.g. 30m, 1h, 1d). Repeatable.")
+
+	return c
+}
+
+func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	title := c.title
+	if title != "" && len(args) > 0 {
+		return output.ErrUsage("--title and positional argument are mutually exclusive")
+	}
+	if title == "" && len(args) > 0 {
+		title = args[0]
+	}
+	if title == "" && !stdinIsTerminal() {
+		var err error
+		title, err = readStdin()
+		if err != nil {
+			return err
+		}
+	}
+	if title == "" {
+		return output.ErrUsageHint("title is required",
+			`hey event create "Meeting" --date 2026-04-06 --start 10:00 --end 11:00`)
+	}
+
+	if c.date == "" {
+		return output.ErrUsageHint("--date is required", "hey event create \"Meeting\" --date 2026-04-06 --start 10:00 --end 11:00")
+	}
+
+	if !c.allDay && (c.start == "" || c.end == "") {
+		return output.ErrUsageHint("--start and --end are required (or use --all-day)",
+			`hey event create "Meeting" --date 2026-04-06 --start 10:00 --end 11:00`)
+	}
+
+	// Resolve calendar ID
+	calendarID := c.calendar
+	if calendarID == 0 {
+		ctx := cmd.Context()
+		payload, err := sdk.Calendars().List(ctx)
+		if err != nil {
+			return convertSDKError(err)
+		}
+		calendars := unwrapCalendars(payload)
+		calendarID, err = findPersonalCalendarID(calendars)
+		if err != nil {
+			return output.ErrNotFound("calendar", "personal")
+		}
+	}
+
+	// Resolve timezone
+	tz := c.timezone
+	if tz == "" {
+		tz = localTimezoneName()
+	}
+
+	// Build form values
+	values, err := buildEventFormValues(title, c.date, c.start, c.end, calendarID, tz, c.allDay, c.reminders)
+	if err != nil {
+		return output.ErrUsage(err.Error())
+	}
+
+	resp, err := apiClient.CreateEvent(values)
+	if err != nil {
+		return err
+	}
+
+	id, _ := resp.ExtractID()
+	data := map[string]any{"id": id, "location": resp.Location}
+
+	if writer.IsStyled() {
+		fmt.Fprintf(cmd.OutOrStdout(), "Event created. (id: %d)\n", id)
+		return nil
+	}
+
+	return writeOK(data, output.WithSummary("Event created"))
+}
+
+// buildEventFormValues builds url.Values for the calendar event form.
+// Returns error if any reminder duration is invalid.
+func buildEventFormValues(title, date, start, end string, calendarID int64, tz string, allDay bool, reminders []string) (url.Values, error) {
+	values := url.Values{}
+	values.Set("calendar_event[calendar_id]", strconv.FormatInt(calendarID, 10))
+	values.Set("calendar_event[summary]", title)
+	values.Set("calendar_event[starts_at]", date)
+	values.Set("calendar_event[ends_at]", date)
+
+	if allDay {
+		values.Set("calendar_event[all_day]", "1")
+	} else {
+		values.Set("calendar_event[all_day]", "0")
+		values.Set("calendar_event[starts_at_time]", start+":00")
+		values.Set("calendar_event[ends_at_time]", end+":00")
+		values.Set("calendar_event[starts_at_time_zone_name]", tz)
+		values.Set("calendar_event[ends_at_time_zone_name]", tz)
+	}
+
+	for _, r := range reminders {
+		secs, err := parseReminderDuration(r)
+		if err != nil {
+			return nil, err
+		}
+		if allDay {
+			values.Add("all_day_reminder_durations[]", strconv.Itoa(secs))
+		} else {
+			values.Add("timed_reminder_durations[]", strconv.Itoa(secs))
+		}
+	}
+
+	return values, nil
+}
+
+// parseReminderDuration parses a human duration string (30m, 1h, 1d) to seconds.
+func parseReminderDuration(s string) (int, error) {
+	if len(s) < 2 {
+		return 0, fmt.Errorf("invalid duration: %s", s)
+	}
+	unit := s[len(s)-1]
+	numStr := s[:len(s)-1]
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration: %s", s)
+	}
+	switch unit {
+	case 'm':
+		return num * 60, nil
+	case 'h':
+		return num * 3600, nil
+	case 'd':
+		return num * 86400, nil
+	default:
+		return 0, fmt.Errorf("invalid duration unit %q in %s (use m, h, or d)", unit, s)
+	}
+}
+
+// localTimezoneName returns the IANA timezone name of the system (e.g. "America/Sao_Paulo").
+// Falls back to timezone abbreviation if IANA name cannot be determined.
+func localTimezoneName() string {
+	// Check TZ environment variable first
+	if tz := os.Getenv("TZ"); tz != "" {
+		return tz
+	}
+
+	// Try /etc/timezone (Debian/Ubuntu)
+	if data, err := os.ReadFile("/etc/timezone"); err == nil {
+		if tz := strings.TrimSpace(string(data)); tz != "" {
+			return tz
+		}
+	}
+
+	// Try Go's Location name (works if TZ was set or system is configured)
+	zone := time.Now().Location().String()
+	if zone != "" && zone != "Local" {
+		return zone
+	}
+
+	// Fallback to abbreviation (e.g. "BRT")
+	name, _ := time.Now().Zone()
+	return name
 }
