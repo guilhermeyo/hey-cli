@@ -41,6 +41,10 @@ hey doctor
 hey drafts
 hey drafts --all
 hey drafts --limit
+hey event
+hey event list
+hey event list --all
+hey event list --limit
 hey habit
 hey habit complete
 hey habit complete --date
