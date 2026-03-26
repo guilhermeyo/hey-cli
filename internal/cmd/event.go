@@ -10,6 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	generated "github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -30,6 +32,7 @@ func newEventCommand() *eventCommand {
 	eventCommand.cmd.AddCommand(newEventListCommand().cmd)
 	eventCommand.cmd.AddCommand(newEventCreateCommand().cmd)
 	eventCommand.cmd.AddCommand(newEventDeleteCommand().cmd)
+	eventCommand.cmd.AddCommand(newEventEditCommand().cmd)
 
 	return eventCommand
 }
@@ -334,6 +337,143 @@ func (c *eventDeleteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeOK(nil, output.WithSummary("Event deleted"))
+}
+
+// edit
+
+type eventEditCommand struct {
+	cmd       *cobra.Command
+	title     string
+	date      string
+	start     string
+	end       string
+	timezone  string
+	reminders []string
+}
+
+func newEventEditCommand() *eventEditCommand {
+	c := &eventEditCommand{}
+	c.cmd = &cobra.Command{
+		Use:   "edit <id>",
+		Short: "Edit a calendar event",
+		Example: `  hey event edit 12345 --start 14:00 --end 15:00
+  hey event edit 12345 --title "New title" --date 2026-04-07
+  hey event edit 12345 --reminder 1d --reminder 30m`,
+		RunE: c.run,
+		Args: usageExactOneArg(),
+	}
+
+	c.cmd.Flags().StringVarP(&c.title, "title", "t", "", "Event title")
+	c.cmd.Flags().StringVar(&c.date, "date", "", "Event date (YYYY-MM-DD)")
+	c.cmd.Flags().StringVar(&c.start, "start", "", "Start time (HH:MM)")
+	c.cmd.Flags().StringVar(&c.end, "end", "", "End time (HH:MM)")
+	c.cmd.Flags().StringVar(&c.timezone, "timezone", "", "Timezone name")
+	c.cmd.Flags().StringSliceVar(&c.reminders, "reminder", nil, "Reminder duration (e.g. 30m, 1h, 1d). Repeatable.")
+
+	return c
+}
+
+func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("invalid event ID: %s", args[0]))
+	}
+
+	// Fetch current event to merge with provided flags
+	ctx := cmd.Context()
+	resp, err := listPersonalRecordings(ctx)
+	if err != nil {
+		return err
+	}
+
+	events := filterRecordingsByType(resp, "Calendar::Event")
+	var current *eventData
+	for _, e := range events {
+		if e.Id == id {
+			current = extractEventData(e)
+			break
+		}
+	}
+	if current == nil {
+		return output.ErrNotFound("event", args[0])
+	}
+
+	// Merge flags with current values
+	if c.title != "" {
+		current.title = c.title
+	}
+	if c.date != "" {
+		current.date = c.date
+	}
+	if c.start != "" {
+		current.start = c.start
+	}
+	if c.end != "" {
+		current.end = c.end
+	}
+	if c.timezone != "" {
+		current.timezone = c.timezone
+	}
+
+	values, err := buildEventFormValues(current.title, current.date, current.start, current.end, current.calendarID, current.timezone, current.allDay, c.reminders)
+	if err != nil {
+		return output.ErrUsage(err.Error())
+	}
+
+	if err := apiClient.UpdateEvent(id, values); err != nil {
+		return err
+	}
+
+	if writer.IsStyled() {
+		fmt.Fprintln(cmd.OutOrStdout(), "Event updated.")
+		return nil
+	}
+
+	return writeOK(nil, output.WithSummary("Event updated"))
+}
+
+// eventData holds extracted event fields for merging in edit.
+type eventData struct {
+	title      string
+	date       string
+	start      string
+	end        string
+	timezone   string
+	calendarID int64
+	allDay     bool
+}
+
+// extractEventData extracts editable fields from a generated.Recording.
+// Recording.StartsAt and EndsAt are time.Time, Calendar is a value type (not pointer).
+func extractEventData(e generated.Recording) *eventData {
+	d := &eventData{
+		title:  e.Title,
+		allDay: e.AllDay,
+	}
+
+	if !e.StartsAt.IsZero() {
+		d.date = e.StartsAt.Format("2006-01-02")
+		d.start = e.StartsAt.Format("15:04")
+	}
+
+	if !e.EndsAt.IsZero() {
+		d.end = e.EndsAt.Format("15:04")
+	}
+
+	d.timezone = e.StartsAtTimeZone
+	if d.timezone == "" {
+		d.timezone = localTimezoneName()
+	}
+
+	if e.Calendar.Id != 0 {
+		d.calendarID = e.Calendar.Id
+	}
+
+	return d
 }
 
 // localTimezoneName returns the IANA timezone name of the system (e.g. "America/Sao_Paulo").

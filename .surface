@@ -52,6 +52,13 @@ hey event create --start
 hey event create --timezone
 hey event create --title
 hey event delete
+hey event edit
+hey event edit --date
+hey event edit --end
+hey event edit --reminder
+hey event edit --start
+hey event edit --timezone
+hey event edit --title
 hey event list
 hey event list --all
 hey event list --limit
