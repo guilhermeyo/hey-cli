@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -26,6 +27,8 @@ func newExtenzionCommand() *extenzionCommand {
 
 	c.cmd.AddCommand(newExtenzionListCommand().cmd)
 	c.cmd.AddCommand(newExtenzionCreateCommand().cmd)
+	c.cmd.AddCommand(newExtenzionEditCommand().cmd)
+	c.cmd.AddCommand(newExtenzionDeleteCommand().cmd)
 
 	return c
 }
@@ -178,4 +181,121 @@ func splitEmail(email string) string {
 		return email[i+1:]
 	}
 	return email
+}
+
+// edit
+
+type extenzionEditCommand struct {
+	cmd     *cobra.Command
+	name    string
+	members []string
+}
+
+func newExtenzionEditCommand() *extenzionEditCommand {
+	c := &extenzionEditCommand{}
+	c.cmd = &cobra.Command{
+		Use:   "edit <id>",
+		Short: "Edit an email extension",
+		Example: `  hey extenzion edit 12345 --name new-name --member alice@example.com
+  hey ext edit 12345 --member alice@example.com --member bob@example.com`,
+		RunE: c.run,
+		Args: usageExactOneArg(),
+	}
+
+	c.cmd.Flags().StringVar(&c.name, "name", "", "New extension name")
+	c.cmd.Flags().StringSliceVar(&c.members, "member", nil, "Member email address (repeatable)")
+
+	return c
+}
+
+func (c *extenzionEditCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("invalid extension ID: %s", args[0]))
+	}
+
+	if c.name == "" && len(c.members) == 0 {
+		return output.ErrUsageHint("at least --name or --member is required",
+			`hey extenzion edit 12345 --name new-name --member alice@example.com`)
+	}
+
+	accountID, _, err := resolveAccountID(cmd)
+	if err != nil {
+		return err
+	}
+
+	if err := apiClient.UpdateExtenzion(accountID, id, c.name, c.members); err != nil {
+		return err
+	}
+
+	if writer.IsStyled() {
+		fmt.Fprintln(cmd.OutOrStdout(), "Extension updated.")
+		return nil
+	}
+
+	return writeOK(nil, output.WithSummary("Extension updated"))
+}
+
+// delete
+
+type extenzionDeleteCommand struct {
+	cmd *cobra.Command
+	yes bool
+}
+
+func newExtenzionDeleteCommand() *extenzionDeleteCommand {
+	c := &extenzionDeleteCommand{}
+	c.cmd = &cobra.Command{
+		Use:     "delete <id>",
+		Short:   "Delete an email extension",
+		Example: `  hey extenzion delete 12345 --yes`,
+		RunE:    c.run,
+		Args:    usageExactOneArg(),
+	}
+
+	c.cmd.Flags().BoolVar(&c.yes, "yes", false, "Skip confirmation prompt")
+
+	return c
+}
+
+func (c *extenzionDeleteCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("invalid extension ID: %s", args[0]))
+	}
+
+	accountID, _, err := resolveAccountID(cmd)
+	if err != nil {
+		return err
+	}
+
+	if !c.yes && !writer.IsStyled() {
+		return output.ErrUsageHint("--yes is required in JSON mode",
+			"hey extenzion delete 12345 --yes --json")
+	}
+	if !c.yes && writer.IsStyled() {
+		if !confirmAction(fmt.Sprintf("Delete extension %d?", id)) {
+			fmt.Fprintln(cmd.OutOrStdout(), "Cancelled.")
+			return nil
+		}
+	}
+
+	if err := apiClient.DeleteExtenzion(accountID, id); err != nil {
+		return err
+	}
+
+	if writer.IsStyled() {
+		fmt.Fprintln(cmd.OutOrStdout(), "Extension deleted.")
+		return nil
+	}
+
+	return writeOK(nil, output.WithSummary("Extension deleted"))
 }

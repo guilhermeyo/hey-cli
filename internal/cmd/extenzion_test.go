@@ -155,3 +155,64 @@ func TestExtenzionCreate_MissingMember(t *testing.T) {
 		t.Fatal("expected error for missing --member")
 	}
 }
+
+func extenzionMutateServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/identity.json":
+			resp := map[string]any{
+				"id": 111111,
+				"primary_contact": map[string]any{
+					"account_id":    999999,
+					"email_address": "test@example.com",
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+
+		case r.Method == "POST" && r.URL.Path == "/accounts/999999/domains/extenzions/100":
+			w.Header().Set("Location", "https://app.hey.com/accounts/999999/domains/extenzions")
+			w.WriteHeader(302)
+
+		default:
+			w.WriteHeader(200)
+		}
+	}))
+}
+
+func TestExtenzionEdit(t *testing.T) {
+	server := extenzionMutateServer(t)
+	defer server.Close()
+
+	resp, err := runExtenzion(t, server, "edit", "100", "--name", "new-name", "--member", "alice@example.com")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !resp.OK {
+		t.Fatal("expected ok=true")
+	}
+}
+
+func TestExtenzionDelete(t *testing.T) {
+	server := extenzionMutateServer(t)
+	defer server.Close()
+
+	resp, err := runExtenzion(t, server, "delete", "100", "--yes")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !resp.OK {
+		t.Fatal("expected ok=true")
+	}
+}
+
+func TestExtenzionDelete_NoYes(t *testing.T) {
+	server := extenzionMutateServer(t)
+	defer server.Close()
+
+	_, err := runExtenzion(t, server, "delete", "100")
+	if err == nil {
+		t.Fatal("expected error when --yes not provided in JSON mode")
+	}
+}
