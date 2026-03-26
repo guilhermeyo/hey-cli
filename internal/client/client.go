@@ -222,12 +222,12 @@ type RedirectResponse struct {
 
 // ExtractID extracts the last numeric path segment from the Location URL.
 func (r *RedirectResponse) ExtractID() (int64, error) {
-	parts := strings.Split(strings.TrimRight(r.Location, "/"), "/")
-	if len(parts) == 0 {
+	loc := strings.TrimRight(r.Location, "/")
+	i := strings.LastIndex(loc, "/")
+	if i < 0 {
 		return 0, fmt.Errorf("no path segments in location: %s", r.Location)
 	}
-	last := parts[len(parts)-1]
-	id, err := strconv.ParseInt(last, 10, 64)
+	id, err := strconv.ParseInt(loc[i+1:], 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("could not parse ID from location %q: %w", r.Location, err)
 	}
@@ -235,15 +235,16 @@ func (r *RedirectResponse) ExtractID() (int64, error) {
 }
 
 // doRedirect performs a request expecting a 302 redirect.
-// Returns the response with Location header on 302, or an error for other statuses.
-// Temporarily disables redirect-following on the shared HTTPClient for the duration of the call.
+// Uses a cloned HTTP client to avoid mutating the shared client's CheckRedirect.
 func (c *Client) doRedirect(method, path string, body io.Reader, contentType string) (*RedirectResponse, error) {
-	// Temporarily disable redirect following
-	orig := c.HTTPClient.CheckRedirect
-	c.HTTPClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		return http.ErrUseLastResponse
+	saved := c.HTTPClient
+	c.HTTPClient = &http.Client{
+		Transport:     saved.Transport,
+		Timeout:       saved.Timeout,
+		Jar:           saved.Jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	defer func() { c.HTTPClient.CheckRedirect = orig }()
+	defer func() { c.HTTPClient = saved }()
 
 	resp, err := c.doRequestAccept(method, path, body, contentType, "text/html")
 	if err != nil {

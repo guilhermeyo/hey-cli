@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,6 +15,20 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/output"
 )
+
+// railsToIANA maps Rails timezone display names to IANA timezone identifiers.
+var railsToIANA = map[string]string{
+	"Brasilia":                       "America/Sao_Paulo",
+	"Eastern Time (US & Canada)":     "America/New_York",
+	"Central Time (US & Canada)":     "America/Chicago",
+	"Mountain Time (US & Canada)":    "America/Denver",
+	"Pacific Time (US & Canada)":     "America/Los_Angeles",
+	"London":                         "Europe/London",
+	"Paris":                          "Europe/Paris",
+	"Berlin":                         "Europe/Berlin",
+	"Tokyo":                          "Asia/Tokyo",
+	"Sydney":                         "Australia/Sydney",
+}
 
 type eventCommand struct {
 	cmd *cobra.Command
@@ -198,7 +213,6 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 			`hey event create "Meeting" --date 2026-04-06 --start 10:00 --end 11:00`)
 	}
 
-	// Resolve calendar ID
 	calendarID := c.calendar
 	if calendarID == 0 {
 		ctx := cmd.Context()
@@ -213,14 +227,21 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Resolve timezone
 	tz := c.timezone
 	if tz == "" {
 		tz = localTimezoneName()
 	}
 
-	// Build form values
-	values, err := buildEventFormValues(title, c.date, c.start, c.end, calendarID, tz, c.allDay, c.reminders)
+	ed := &eventData{
+		title:      title,
+		date:       c.date,
+		start:      c.start,
+		end:        c.end,
+		timezone:   tz,
+		calendarID: calendarID,
+		allDay:     c.allDay,
+	}
+	values, err := buildEventFormValues(ed, c.reminders)
 	if err != nil {
 		return output.ErrUsage(err.Error())
 	}
@@ -241,23 +262,21 @@ func (c *eventCreateCommand) run(cmd *cobra.Command, args []string) error {
 	return writeOK(data, output.WithSummary("Event created"))
 }
 
-// buildEventFormValues builds url.Values for the calendar event form.
-// Returns error if any reminder duration is invalid.
-func buildEventFormValues(title, date, start, end string, calendarID int64, tz string, allDay bool, reminders []string) (url.Values, error) {
+func buildEventFormValues(ed *eventData, reminders []string) (url.Values, error) {
 	values := url.Values{}
-	values.Set("calendar_event[calendar_id]", strconv.FormatInt(calendarID, 10))
-	values.Set("calendar_event[summary]", title)
-	values.Set("calendar_event[starts_at]", date)
-	values.Set("calendar_event[ends_at]", date)
+	values.Set("calendar_event[calendar_id]", strconv.FormatInt(ed.calendarID, 10))
+	values.Set("calendar_event[summary]", ed.title)
+	values.Set("calendar_event[starts_at]", ed.date)
+	values.Set("calendar_event[ends_at]", ed.date)
 
-	if allDay {
+	if ed.allDay {
 		values.Set("calendar_event[all_day]", "1")
 	} else {
 		values.Set("calendar_event[all_day]", "0")
-		values.Set("calendar_event[starts_at_time]", start+":00")
-		values.Set("calendar_event[ends_at_time]", end+":00")
-		values.Set("calendar_event[starts_at_time_zone_name]", tz)
-		values.Set("calendar_event[ends_at_time_zone_name]", tz)
+		values.Set("calendar_event[starts_at_time]", ed.start+":00")
+		values.Set("calendar_event[ends_at_time]", ed.end+":00")
+		values.Set("calendar_event[starts_at_time_zone_name]", ed.timezone)
+		values.Set("calendar_event[ends_at_time_zone_name]", ed.timezone)
 	}
 
 	for _, r := range reminders {
@@ -265,7 +284,7 @@ func buildEventFormValues(title, date, start, end string, calendarID int64, tz s
 		if err != nil {
 			return nil, err
 		}
-		if allDay {
+		if ed.allDay {
 			values.Add("all_day_reminder_durations[]", strconv.Itoa(secs))
 		} else {
 			values.Add("timed_reminder_durations[]", strconv.Itoa(secs))
@@ -419,7 +438,7 @@ func (c *eventEditCommand) run(cmd *cobra.Command, args []string) error {
 		current.timezone = c.timezone
 	}
 
-	values, err := buildEventFormValues(current.title, current.date, current.start, current.end, current.calendarID, current.timezone, current.allDay, c.reminders)
+	values, err := buildEventFormValues(current, c.reminders)
 	if err != nil {
 		return output.ErrUsage(err.Error())
 	}
@@ -480,25 +499,9 @@ func extractEventData(e generated.Recording) *eventData {
 	return d
 }
 
-// loadLocation resolves a timezone name to a *time.Location.
-// Handles both IANA names ("America/Sao_Paulo") and Rails display names ("Brasilia")
-// by trying the name directly, then checking common Rails timezone mappings.
 func loadLocation(name string) *time.Location {
 	if loc, err := time.LoadLocation(name); err == nil {
 		return loc
-	}
-	// Rails timezone display names that don't match IANA
-	railsToIANA := map[string]string{
-		"Brasilia":          "America/Sao_Paulo",
-		"Eastern Time (US & Canada)": "America/New_York",
-		"Central Time (US & Canada)": "America/Chicago",
-		"Mountain Time (US & Canada)": "America/Denver",
-		"Pacific Time (US & Canada)": "America/Los_Angeles",
-		"London":            "Europe/London",
-		"Paris":             "Europe/Paris",
-		"Berlin":            "Europe/Berlin",
-		"Tokyo":             "Asia/Tokyo",
-		"Sydney":            "Australia/Sydney",
 	}
 	if iana, ok := railsToIANA[name]; ok {
 		if loc, err := time.LoadLocation(iana); err == nil {
@@ -508,28 +511,31 @@ func loadLocation(name string) *time.Location {
 	return time.Local
 }
 
-// localTimezoneName returns the IANA timezone name of the system (e.g. "America/Sao_Paulo").
-// Falls back to timezone abbreviation if IANA name cannot be determined.
+var (
+	localTZOnce sync.Once
+	localTZName string
+)
+
+// localTimezoneName returns the IANA timezone name of the system.
+// Result is cached for the lifetime of the process.
 func localTimezoneName() string {
-	// Check TZ environment variable first
-	if tz := os.Getenv("TZ"); tz != "" {
-		return tz
-	}
-
-	// Try /etc/timezone (Debian/Ubuntu)
-	if data, err := os.ReadFile("/etc/timezone"); err == nil {
-		if tz := strings.TrimSpace(string(data)); tz != "" {
-			return tz
+	localTZOnce.Do(func() {
+		if tz := os.Getenv("TZ"); tz != "" {
+			localTZName = tz
+			return
 		}
-	}
-
-	// Try Go's Location name (works if TZ was set or system is configured)
-	zone := time.Now().Location().String()
-	if zone != "" && zone != "Local" {
-		return zone
-	}
-
-	// Fallback to abbreviation (e.g. "BRT")
-	name, _ := time.Now().Zone()
-	return name
+		if data, err := os.ReadFile("/etc/timezone"); err == nil {
+			if tz := strings.TrimSpace(string(data)); tz != "" {
+				localTZName = tz
+				return
+			}
+		}
+		now := time.Now()
+		if zone := now.Location().String(); zone != "" && zone != "Local" {
+			localTZName = zone
+			return
+		}
+		localTZName, _ = now.Zone()
+	})
+	return localTZName
 }

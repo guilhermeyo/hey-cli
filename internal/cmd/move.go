@@ -47,7 +47,6 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Validate mutually exclusive args
 	if c.contactID != 0 && len(args) > 0 {
 		return output.ErrUsage("topic ID and --contact are mutually exclusive")
 	}
@@ -56,14 +55,12 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 			"hey move 1912351860 --box feedbox  or  hey move --contact 166563294 --box feedbox")
 	}
 
-	// Validate box kind
 	if !isValidBoxKind(c.box) {
 		return output.ErrUsage(fmt.Sprintf("invalid box kind %q (valid: %v)", c.box, validBoxKinds))
 	}
 
 	ctx := cmd.Context()
 
-	// Resolve contact from topic if needed
 	contactID := c.contactID
 	contactName := ""
 	contactEmail := ""
@@ -84,7 +81,6 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 		contactEmail = topic.Creator.EmailAddress
 	}
 
-	// Resolve box ID
 	boxesPtr, err := sdk.Boxes().List(ctx)
 	if err != nil {
 		return convertSDKError(err)
@@ -105,13 +101,12 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 		return output.ErrNotFound("box", c.box)
 	}
 
-	// Confirmation
 	if !c.yes && !writer.IsStyled() {
 		return output.ErrUsageHint("--yes is required in JSON mode",
 			"hey move 1912351860 --box feedbox --yes --json")
 	}
 	if !c.yes && writer.IsStyled() {
-		prompt := fmt.Sprintf("Move contact")
+		var prompt string
 		if contactName != "" {
 			prompt = fmt.Sprintf("Move contact %q (%s)", contactName, contactEmail)
 		} else {
@@ -125,7 +120,6 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Execute
 	if err := apiClient.DesignateContact(boxID, contactID); err != nil {
 		return err
 	}

@@ -151,23 +151,25 @@ func unwrapCalendars(payload *generated.CalendarListPayload) []generated.Calenda
 }
 
 // findPersonalCalendarID finds the default calendar from a list of calendars.
-// Prefers the first non-external "General" calendar (the primary HEY calendar),
-// then falls back to personal or "Personal" named calendars.
+// Priority: non-external "General" > personal flag > "Personal" name.
 func findPersonalCalendarID(calendars []generated.Calendar) (int64, error) {
+	var personalID, namedID int64
 	for _, cal := range calendars {
 		if strings.EqualFold(cal.Name, "General") && !cal.External {
 			return cal.Id, nil
 		}
-	}
-	for _, cal := range calendars {
-		if cal.Personal {
-			return cal.Id, nil
+		if personalID == 0 && cal.Personal {
+			personalID = cal.Id
+		}
+		if namedID == 0 && strings.EqualFold(cal.Name, "Personal") {
+			namedID = cal.Id
 		}
 	}
-	for _, cal := range calendars {
-		if strings.EqualFold(cal.Name, "Personal") {
-			return cal.Id, nil
-		}
+	if personalID != 0 {
+		return personalID, nil
+	}
+	if namedID != 0 {
+		return namedID, nil
 	}
 	return 0, fmt.Errorf("personal calendar not found")
 }

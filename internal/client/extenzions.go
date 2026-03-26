@@ -93,7 +93,6 @@ func parseExtenzionSection(section *html.Node) (Extenzion, bool) {
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
-			// Extract ID from edit link
 			if n.Data == "a" {
 				href := getAttr(n, "href")
 				if m := extenzionIDRegex.FindStringSubmatch(href); m != nil {
@@ -101,10 +100,8 @@ func parseExtenzionSection(section *html.Node) (Extenzion, bool) {
 				}
 			}
 
-			// Extract name and email from h2.extenzion__name
 			if n.Data == "h2" && hasClass(n, "extenzion__name") {
 				ext.Email = strings.TrimSpace(textContent(n))
-				// Name is inside <strong>
 				for c := n.FirstChild; c != nil; c = c.NextSibling {
 					if c.Type == html.ElementNode && c.Data == "strong" {
 						ext.Name = strings.TrimSpace(textContent(c))
@@ -112,7 +109,6 @@ func parseExtenzionSection(section *html.Node) (Extenzion, bool) {
 				}
 			}
 
-			// Extract members from extenzion-contacts div
 			if n.Data == "div" && hasClass(n, "extenzion-contacts") {
 				ext.Members = parseMembers(n)
 			}
