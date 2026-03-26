@@ -448,20 +448,12 @@ type eventData struct {
 }
 
 // extractEventData extracts editable fields from a generated.Recording.
-// Recording.StartsAt and EndsAt are time.Time, Calendar is a value type (not pointer).
+// Recording.StartsAt and EndsAt are time.Time (UTC), Calendar is a value type (not pointer).
+// Times are converted to the event's timezone before extracting HH:MM.
 func extractEventData(e generated.Recording) *eventData {
 	d := &eventData{
 		title:  e.Title,
 		allDay: e.AllDay,
-	}
-
-	if !e.StartsAt.IsZero() {
-		d.date = e.StartsAt.Format("2006-01-02")
-		d.start = e.StartsAt.Format("15:04")
-	}
-
-	if !e.EndsAt.IsZero() {
-		d.end = e.EndsAt.Format("15:04")
 	}
 
 	d.timezone = e.StartsAtTimeZone
@@ -469,11 +461,51 @@ func extractEventData(e generated.Recording) *eventData {
 		d.timezone = localTimezoneName()
 	}
 
+	loc := loadLocation(d.timezone)
+
+	if !e.StartsAt.IsZero() {
+		local := e.StartsAt.In(loc)
+		d.date = local.Format("2006-01-02")
+		d.start = local.Format("15:04")
+	}
+
+	if !e.EndsAt.IsZero() {
+		d.end = e.EndsAt.In(loc).Format("15:04")
+	}
+
 	if e.Calendar.Id != 0 {
 		d.calendarID = e.Calendar.Id
 	}
 
 	return d
+}
+
+// loadLocation resolves a timezone name to a *time.Location.
+// Handles both IANA names ("America/Sao_Paulo") and Rails display names ("Brasilia")
+// by trying the name directly, then checking common Rails timezone mappings.
+func loadLocation(name string) *time.Location {
+	if loc, err := time.LoadLocation(name); err == nil {
+		return loc
+	}
+	// Rails timezone display names that don't match IANA
+	railsToIANA := map[string]string{
+		"Brasilia":          "America/Sao_Paulo",
+		"Eastern Time (US & Canada)": "America/New_York",
+		"Central Time (US & Canada)": "America/Chicago",
+		"Mountain Time (US & Canada)": "America/Denver",
+		"Pacific Time (US & Canada)": "America/Los_Angeles",
+		"London":            "Europe/London",
+		"Paris":             "Europe/Paris",
+		"Berlin":            "Europe/Berlin",
+		"Tokyo":             "Asia/Tokyo",
+		"Sydney":            "Australia/Sydney",
+	}
+	if iana, ok := railsToIANA[name]; ok {
+		if loc, err := time.LoadLocation(iana); err == nil {
+			return loc
+		}
+	}
+	return time.Local
 }
 
 // localTimezoneName returns the IANA timezone name of the system (e.g. "America/Sao_Paulo").
