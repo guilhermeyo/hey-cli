@@ -63,6 +63,8 @@ hey event list
 hey event list --all
 hey event list --limit
 hey extenzion
+hey extenzion create
+hey extenzion create --member
 hey extenzion list
 hey habit
 hey habit complete
