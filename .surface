@@ -65,6 +65,11 @@ hey event list --limit
 hey extenzion
 hey extenzion create
 hey extenzion create --member
+hey extenzion delete
+hey extenzion delete --yes
+hey extenzion edit
+hey extenzion edit --member
+hey extenzion edit --name
 hey extenzion list
 hey habit
 hey habit complete
