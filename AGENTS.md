@@ -26,7 +26,12 @@ This is a Go project that uses:
 - [spf13/cobra](github.com/spf13/cobra) for the CLI interface
 - [charm.land/bubbletea/v2] for the TUI interface along with bubbles/v2 and lipgloss/v2 (these are new versions that recently came out and differ from the v1 versions!)
 
-Most API interactions go through the HEY SDK (`hey-sdk/go`), with typed service methods accessed via `internal/cmd/sdk.go` (e.g., `sdk.Boxes().List`, `sdk.Messages().Create`, `sdk.Calendars().GetRecordings`). A legacy `internal/client.Client` remains for two gap operations where the SDK lacks body content: `GetTopicEntries` (HTML-scraped topic entries for `hey threads` and TUI) and `GetJournalEntry` (HTML-scraped journal fallback when the JSON API returns 204). Authentication and token refresh are handled via `internal/auth/`.
+Most API interactions go through the HEY SDK (`hey-sdk/go`), with typed service methods accessed via `internal/cmd/sdk.go` (e.g., `sdk.Boxes().List`, `sdk.Messages().Create`, `sdk.Calendars().GetRecordings`). A legacy `internal/client.Client` is used for operations that fall outside the SDK:
+
+- **HTML scraping** — `GetTopicEntries` (topic entries for `hey threads` and TUI) and `GetJournalEntry` (journal fallback when the JSON API returns 204).
+- **302 redirect endpoints** — `PostForm`, `PatchForm`, `Delete` handle endpoints that respond with a redirect instead of JSON. Used by `hey event create/edit/delete` (calendar events) and `hey move` (contact box designation). The `RedirectResponse` type captures the `Location` header and can extract resource IDs from it.
+
+Authentication and token refresh are handled via `internal/auth/`.
 
 ### Authentication
 
@@ -79,7 +84,7 @@ Whenever you add, remove or change any functionality add/remove/change tests as 
 
 Smoke tests verify all CLI commands against a real HEY server. They live in `tests/smoke/` as a separate Go module and use a pre-compiled binary built by `make build`.
 
-**What they test:** Every CLI command and its flags — boxes, box, compose, reply, threads, drafts, calendars, recordings, todo, journal, habit, timetrack, seen/unseen, config, auth, and all output format flags (--json, --quiet, --ids-only, --count, --markdown, --styled, --verbose, --stats). Browser-based cross-verification tests confirm CLI actions are visible in the browser and vice versa.
+**What they test:** Every CLI command and its flags — boxes, box, compose, reply, threads, drafts, calendars, recordings, todo, journal, habit, timetrack, event, move, seen/unseen, config, auth, and all output format flags (--json, --quiet, --ids-only, --count, --markdown, --styled, --verbose, --stats). Browser-based cross-verification tests confirm CLI actions are visible in the browser and vice versa.
 
 **Running:**
 

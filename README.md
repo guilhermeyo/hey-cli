@@ -79,7 +79,27 @@ hey drafts                         # list drafts
 
 ```bash
 hey calendars                      # list calendars
-hey recordings 1 --starts-on 2026-01-01 --ends-on 2026-01-31  # list events in a calendar
+hey recordings 1 --starts-on 2026-01-01 --ends-on 2026-01-31  # list recordings in a calendar
+```
+
+### Events
+
+```bash
+hey event list                     # list calendar events
+hey event list --limit 10          # list with limit
+hey event create "Meeting" --date 2026-04-06 --start 10:00 --end 11:00  # create event
+hey event create "Holiday" --date 2026-04-06 --all-day                  # all-day event
+hey event create "Standup" --date 2026-04-06 --start 09:00 --end 09:30 --reminder 30m --reminder 1d
+hey event edit 123 --title "New title" --start 14:00 --end 15:00  # edit event
+hey event delete 123               # delete event
+```
+
+### Move contacts
+
+```bash
+hey move 1912351860 --box feedbox          # move a contact to The Feed (by topic ID)
+hey move --contact 166563294 --box trailbox  # move by contact ID
+hey move 1912351860 --box imbox --yes      # skip confirmation
 ```
 
 ### Todos
