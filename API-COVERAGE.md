@@ -36,3 +36,7 @@ The legacy `internal/client/` is used only for HTML-scraping gap operations mark
 | `/calendar/events/{id}` | PATCH | Legacy `PatchForm` | `hey event edit` | covered (non-SDK) |
 | `/calendar/events/{id}` | DELETE | Legacy `Delete` | `hey event delete` | covered (non-SDK) |
 | `/boxes/{id}/designations` | POST | Legacy `PostForm` | `hey move` | covered (non-SDK) |
+| `/accounts/{id}/domains/extenzions` | GET | Legacy `GetHTML` | `hey extenzion list` | covered (non-SDK, HTML scrape) |
+| `/accounts/{id}/domains/extenzions` | POST | Legacy `PostForm` | `hey extenzion create` | covered (non-SDK) |
+| `/accounts/{id}/domains/extenzions/{id}` | POST (_method=patch) | Legacy `PostForm` | `hey extenzion edit` | covered (non-SDK) |
+| `/accounts/{id}/domains/extenzions/{id}` | POST (_method=delete) | Legacy `PostForm` | `hey extenzion delete` | covered (non-SDK) |

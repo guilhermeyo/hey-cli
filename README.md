@@ -102,6 +102,15 @@ hey move --contact 166563294 --box trailbox  # move by contact ID
 hey move 1912351860 --box imbox --yes      # skip confirmation
 ```
 
+### Extensions
+
+```bash
+hey extenzion list                                    # list email extensions
+hey extenzion create sales --member alice@example.com # create extension
+hey extenzion edit 12345 --name support --member bob@example.com  # edit extension
+hey extenzion delete 12345 --yes                      # delete extension
+```
+
 ### Todos
 
 ```bash
