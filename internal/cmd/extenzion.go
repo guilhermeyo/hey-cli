@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +25,7 @@ func newExtenzionCommand() *extenzionCommand {
 	}
 
 	c.cmd.AddCommand(newExtenzionListCommand().cmd)
+	c.cmd.AddCommand(newExtenzionCreateCommand().cmd)
 
 	return c
 }
@@ -110,4 +112,70 @@ func (c *extenzionListCommand) run(cmd *cobra.Command, args []string) error {
 			},
 		),
 	)
+}
+
+// create
+
+type extenzionCreateCommand struct {
+	cmd     *cobra.Command
+	members []string
+}
+
+func newExtenzionCreateCommand() *extenzionCreateCommand {
+	c := &extenzionCreateCommand{}
+	c.cmd = &cobra.Command{
+		Use:   "create <name>",
+		Short: "Create an email extension",
+		Example: `  hey extenzion create sales --member alice@example.com
+  hey ext create support --member alice@example.com --member bob@example.com`,
+		RunE: c.run,
+		Args: usageExactOneArg(),
+	}
+
+	c.cmd.Flags().StringSliceVar(&c.members, "member", nil, "Member email address (repeatable, at least one required)")
+
+	return c
+}
+
+func (c *extenzionCreateCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	name := args[0]
+
+	if len(c.members) == 0 {
+		return output.ErrUsageHint("at least one --member is required",
+			`hey extenzion create sales --member alice@example.com`)
+	}
+
+	accountID, email, err := resolveAccountID(cmd)
+	if err != nil {
+		return err
+	}
+
+	domain := splitEmail(email)
+	fullEmail := name + "@" + domain
+
+	_, err = apiClient.CreateExtenzion(accountID, name, c.members)
+	if err != nil {
+		return err
+	}
+
+	if writer.IsStyled() {
+		fmt.Fprintf(cmd.OutOrStdout(), "Extension %s created.\n", fullEmail)
+		return nil
+	}
+
+	return writeOK(map[string]any{"name": name, "email": fullEmail},
+		output.WithSummary(fmt.Sprintf("Extension %s created", fullEmail)),
+	)
+}
+
+// splitEmail returns the domain part of an email address.
+func splitEmail(email string) string {
+	if i := strings.Index(email, "@"); i >= 0 {
+		return email[i+1:]
+	}
+	return email
 }

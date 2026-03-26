@@ -94,3 +94,64 @@ func TestExtenzionList(t *testing.T) {
 		t.Fatal("expected ok=true")
 	}
 }
+
+func extenzionCreateServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/identity.json":
+			resp := map[string]any{
+				"id": 111111,
+				"primary_contact": map[string]any{
+					"account_id":    999999,
+					"email_address": "test@example.com",
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(resp)
+
+		case r.Method == "POST" && r.URL.Path == "/accounts/999999/domains/extenzions":
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			w.Header().Set("Location", "https://app.hey.com/accounts/999999/domains/extenzions")
+			w.WriteHeader(302)
+
+		default:
+			w.WriteHeader(200)
+		}
+	}))
+}
+
+func TestExtenzionCreate(t *testing.T) {
+	server := extenzionCreateServer(t)
+	defer server.Close()
+
+	resp, err := runExtenzion(t, server, "create", "sales", "--member", "alice@example.com", "--member", "bob@example.com")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !resp.OK {
+		t.Fatal("expected ok=true")
+	}
+}
+
+func TestExtenzionCreate_MissingName(t *testing.T) {
+	server := extenzionCreateServer(t)
+	defer server.Close()
+
+	_, err := runExtenzion(t, server, "create")
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+}
+
+func TestExtenzionCreate_MissingMember(t *testing.T) {
+	server := extenzionCreateServer(t)
+	defer server.Close()
+
+	_, err := runExtenzion(t, server, "create", "sales")
+	if err == nil {
+		t.Fatal("expected error for missing --member")
+	}
+}
