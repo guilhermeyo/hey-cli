@@ -144,6 +144,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newTimetrackCommand().cmd)
 	root.AddCommand(newEventCommand().cmd)
 	root.AddCommand(newMoveCommand().cmd)
+	root.AddCommand(newExtenzionCommand().cmd)
 	root.AddCommand(newJournalCommand().cmd)
 	root.AddCommand(newSeenCommand().cmd)
 	root.AddCommand(newUnseenCommand().cmd)

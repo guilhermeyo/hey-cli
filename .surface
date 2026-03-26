@@ -62,6 +62,8 @@ hey event edit --title
 hey event list
 hey event list --all
 hey event list --limit
+hey extenzion
+hey extenzion list
 hey habit
 hey habit complete
 hey habit complete --date
