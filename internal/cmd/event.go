@@ -29,6 +29,7 @@ func newEventCommand() *eventCommand {
 
 	eventCommand.cmd.AddCommand(newEventListCommand().cmd)
 	eventCommand.cmd.AddCommand(newEventCreateCommand().cmd)
+	eventCommand.cmd.AddCommand(newEventDeleteCommand().cmd)
 
 	return eventCommand
 }
@@ -292,6 +293,47 @@ func parseReminderDuration(s string) (int, error) {
 	default:
 		return 0, fmt.Errorf("invalid duration unit %q in %s (use m, h, or d)", unit, s)
 	}
+}
+
+// delete
+
+type eventDeleteCommand struct {
+	cmd *cobra.Command
+}
+
+func newEventDeleteCommand() *eventDeleteCommand {
+	c := &eventDeleteCommand{}
+	c.cmd = &cobra.Command{
+		Use:     "delete <id>",
+		Short:   "Delete a calendar event",
+		Example: `  hey event delete 12345`,
+		RunE:    c.run,
+		Args:    usageExactOneArg(),
+	}
+
+	return c
+}
+
+func (c *eventDeleteCommand) run(cmd *cobra.Command, args []string) error {
+	if err := requireAuth(); err != nil {
+		return err
+	}
+
+	id, err := strconv.ParseInt(args[0], 10, 64)
+	if err != nil {
+		return output.ErrUsage(fmt.Sprintf("invalid event ID: %s", args[0]))
+	}
+
+	if err := apiClient.DeleteEvent(id); err != nil {
+		return err
+	}
+
+	if writer.IsStyled() {
+		fmt.Fprintln(cmd.OutOrStdout(), "Event deleted.")
+		return nil
+	}
+
+	return writeOK(nil, output.WithSummary("Event deleted"))
 }
 
 // localTimezoneName returns the IANA timezone name of the system (e.g. "America/Sao_Paulo").

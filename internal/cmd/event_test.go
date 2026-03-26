@@ -225,3 +225,53 @@ func TestEventCreate_MissingTimeWithoutAllDay(t *testing.T) {
 		t.Fatal("expected error for missing --start/--end without --all-day")
 	}
 }
+
+func eventDeleteServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "DELETE" && r.URL.Path == "/calendar/events/100":
+			w.Header().Set("Location", "https://app.hey.com/calendar/days/2026-04-06")
+			w.WriteHeader(302)
+		default:
+			w.WriteHeader(200)
+		}
+	}))
+}
+
+func runEventDelete(t *testing.T, server *httptest.Server, args ...string) (output.Response, error) {
+	t.Helper()
+	t.Setenv("HEY_TOKEN", "test-token")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
+
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs(append([]string{"event", "delete", "--json", "--base-url", server.URL}, args...))
+
+	err := root.Execute()
+	var resp output.Response
+	if buf.Len() > 0 {
+		_ = json.Unmarshal(buf.Bytes(), &resp)
+	}
+	return resp, err
+}
+
+func TestEventDelete(t *testing.T) {
+	server := eventDeleteServer(t)
+	defer server.Close()
+
+	resp, err := runEventDelete(t, server, "100")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !resp.OK {
+		t.Fatal("expected ok=true")
+	}
+}
