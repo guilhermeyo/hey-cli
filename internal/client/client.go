@@ -8,6 +8,8 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -211,4 +213,106 @@ func (c *Client) PostJSON(path string, body any) ([]byte, error) {
 		}
 	}
 	return c.doOnce("POST", path, encoded, "application/json", "application/json")
+}
+
+// RedirectResponse holds the Location header from a 302 redirect.
+type RedirectResponse struct {
+	Location string
+}
+
+// ExtractID extracts the last numeric path segment from the Location URL.
+func (r *RedirectResponse) ExtractID() (int64, error) {
+	parts := strings.Split(strings.TrimRight(r.Location, "/"), "/")
+	if len(parts) == 0 {
+		return 0, fmt.Errorf("no path segments in location: %s", r.Location)
+	}
+	last := parts[len(parts)-1]
+	id, err := strconv.ParseInt(last, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("could not parse ID from location %q: %w", r.Location, err)
+	}
+	return id, nil
+}
+
+// noRedirectClient returns an HTTP client that does not follow redirects,
+// cloned from the shared client to avoid mutating it.
+func (c *Client) noRedirectClient() *http.Client {
+	return &http.Client{
+		Timeout:   c.HTTPClient.Timeout,
+		Transport: c.HTTPClient.Transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
+// doRedirect performs a request expecting a 302 redirect.
+// Returns the response with Location header on 302, or an error for other statuses.
+func (c *Client) doRedirect(method, path string, body io.Reader, contentType string) (*RedirectResponse, error) {
+	base := strings.TrimRight(c.BaseURL, "/")
+	reqURL := base + path
+
+	ctx := context.Background()
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, body)
+	if err != nil {
+		return nil, apierr.ErrAPI(0, fmt.Sprintf("could not create request: %v", err))
+	}
+
+	if err = c.AuthMgr.AuthenticateRequest(ctx, req); err != nil {
+		return nil, apierr.ErrAuth(fmt.Sprintf("authentication failed: %v", err))
+	}
+
+	req.Header.Set("User-Agent", version.UserAgent())
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	if c.Logger != nil {
+		fmt.Fprintf(c.Logger, "> %s %s\n", method, reqURL)
+	}
+
+	start := time.Now()
+	nrc := c.noRedirectClient()
+	resp, err := nrc.Do(req)
+	elapsed := time.Since(start)
+
+	c.requestCount.Add(1)
+	c.totalLatency.Add(int64(elapsed))
+
+	if err != nil {
+		return nil, apierr.ErrNetwork(err)
+	}
+	defer resp.Body.Close()
+
+	if c.Logger != nil {
+		fmt.Fprintf(c.Logger, "< %d %s (%dms)\n", resp.StatusCode, http.StatusText(resp.StatusCode), elapsed.Milliseconds())
+	}
+
+	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusSeeOther {
+		return &RedirectResponse{Location: resp.Header.Get("Location")}, nil
+	}
+
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, responseError(resp, data)
+	}
+
+	return nil, apierr.ErrAPI(resp.StatusCode, fmt.Sprintf("expected redirect, got %d", resp.StatusCode))
+}
+
+// PostForm sends a POST request with form-encoded body, expecting a 302 redirect.
+func (c *Client) PostForm(path string, values url.Values) (*RedirectResponse, error) {
+	return c.doRedirect("POST", path, strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
+}
+
+// PatchForm sends a PATCH request with form-encoded body, expecting a 302 redirect.
+func (c *Client) PatchForm(path string, values url.Values) error {
+	_, err := c.doRedirect("PATCH", path, strings.NewReader(values.Encode()), "application/x-www-form-urlencoded")
+	return err
+}
+
+// Delete sends a DELETE request, expecting a 302 redirect.
+func (c *Client) Delete(path string) error {
+	_, err := c.doRedirect("DELETE", path, nil, "")
+	return err
 }

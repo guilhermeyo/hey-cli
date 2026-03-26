@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -108,6 +109,98 @@ func TestDoWithRetryExhausted(t *testing.T) {
 	}
 	if got := calls.Load(); got != int32(maxRetries) {
 		t.Errorf("expected %d calls, got %d", maxRetries, got)
+	}
+}
+
+func TestPostForm_302(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "application/x-www-form-urlencoded" {
+			t.Errorf("content-type = %s, want application/x-www-form-urlencoded", ct)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if got := r.PostFormValue("calendar_event[summary]"); got != "Test" {
+			t.Errorf("summary = %q, want %q", got, "Test")
+		}
+		w.Header().Set("Location", "https://app.hey.com/calendar/events/12345")
+		w.WriteHeader(302)
+	}))
+	defer server.Close()
+
+	c := testClient(t, server)
+	resp, err := c.PostForm("/calendar/events", url.Values{
+		"calendar_event[summary]": {"Test"},
+	})
+	if err != nil {
+		t.Fatalf("PostForm: %v", err)
+	}
+	if resp.Location != "https://app.hey.com/calendar/events/12345" {
+		t.Errorf("location = %q, want %q", resp.Location, "https://app.hey.com/calendar/events/12345")
+	}
+	id, err := resp.ExtractID()
+	if err != nil {
+		t.Fatalf("ExtractID: %v", err)
+	}
+	if id != 12345 {
+		t.Errorf("id = %d, want %d", id, 12345)
+	}
+}
+
+func TestPatchForm_302(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" {
+			t.Errorf("method = %s, want PATCH", r.Method)
+		}
+		w.Header().Set("Location", "https://app.hey.com/calendar/days/2026-04-06")
+		w.WriteHeader(302)
+	}))
+	defer server.Close()
+
+	c := testClient(t, server)
+	err := c.PatchForm("/calendar/events/12345", url.Values{
+		"calendar_event[summary]": {"Updated"},
+	})
+	if err != nil {
+		t.Fatalf("PatchForm: %v", err)
+	}
+}
+
+func TestDelete_302(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "DELETE" {
+			t.Errorf("method = %s, want DELETE", r.Method)
+		}
+		w.Header().Set("Location", "https://app.hey.com/calendar/days/2026-04-06")
+		w.WriteHeader(302)
+	}))
+	defer server.Close()
+
+	c := testClient(t, server)
+	err := c.Delete("/calendar/events/12345")
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+}
+
+func TestPostForm_Error(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(422)
+		fmt.Fprint(w, "validation error")
+	}))
+	defer server.Close()
+
+	c := testClient(t, server)
+	_, err := c.PostForm("/calendar/events", url.Values{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	oerr := apierr.AsError(err)
+	if oerr.Code != "api" {
+		t.Errorf("code = %q, want %q", oerr.Code, "api")
 	}
 }
 
