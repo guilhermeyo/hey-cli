@@ -33,12 +33,19 @@ func newExtenzionCommand() *extenzionCommand {
 	return c
 }
 
-// resolveAccountID fetches the account ID from the identity endpoint.
+// resolveAccountID fetches the domain account ID from the identity endpoint.
+// Extensions only exist on custom-domain accounts, so we look for an account
+// with a non-empty Domain field. Falls back to PrimaryContact if none found.
 func resolveAccountID(cmd *cobra.Command) (int64, string, error) {
 	ctx := cmd.Context()
 	identity, err := sdk.Identity().GetIdentity(ctx)
 	if err != nil {
 		return 0, "", convertSDKError(err)
+	}
+	for _, acct := range identity.Accounts {
+		if acct.Domain != "" {
+			return acct.Id, acct.Domain, nil
+		}
 	}
 	return identity.PrimaryContact.AccountId, identity.PrimaryContact.EmailAddress, nil
 }
